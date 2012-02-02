@@ -68,6 +68,7 @@ import org.saiku.olap.util.formatter.CellSetFormatter;
 import org.saiku.olap.util.formatter.FlattenedCellSetFormatter;
 import org.saiku.olap.util.formatter.HierarchicalCellSetFormatter;
 import org.saiku.olap.util.formatter.ICellSetFormatter;
+import org.saiku.olap.util.formatter.ICellSetFormatterFactory;
 import org.saiku.service.util.OlapUtil;
 import org.saiku.service.util.exception.SaikuServiceException;
 import org.saiku.service.util.export.CsvExporter;
@@ -87,6 +88,8 @@ public class OlapQueryService implements Serializable {
 	private OlapDiscoverService olapDiscoverService;
 
 	private Map<String,IQuery> queries = new HashMap<String,IQuery>();
+	
+	private ICellSetFormatterFactory cellSetFormatterFactory;
 
 	public void setOlapDiscoverService(OlapDiscoverService os) {
 		olapDiscoverService = os;
@@ -150,17 +153,8 @@ public class OlapQueryService implements Serializable {
 	}
 
 	public CellDataSet execute(String queryName, String formatter) {
-		formatter = formatter == null ? "" : formatter.toLowerCase(); 
-		if(formatter.equals("flat")) {
-			return execute(queryName, new CellSetFormatter());
-		}
-		else if (formatter.equals("hierarchical")) {
-			return execute(queryName, new HierarchicalCellSetFormatter());
-		}
-		else if (formatter.equals("flattened")) {
-			return execute(queryName, new FlattenedCellSetFormatter());
-		}
-		return execute(queryName, new HierarchicalCellSetFormatter());
+	    ICellSetFormatter cellSetFormatter = cellSetFormatterFactory.getCellSetFormatter(formatter);
+        return execute(queryName, cellSetFormatter);
 	}
 
 	public CellDataSet execute(String queryName, ICellSetFormatter formatter) {
@@ -622,5 +616,11 @@ public class OlapQueryService implements Serializable {
 		}
 		return query;
 	}
-
+	
+	public ICellSetFormatterFactory getCellSetFormatterFactory() {
+        return cellSetFormatterFactory;
+    }
+	public void setCellSetFormatterFactory(ICellSetFormatterFactory cellSetFormatterFactory) {
+        this.cellSetFormatterFactory = cellSetFormatterFactory;
+    }
 }

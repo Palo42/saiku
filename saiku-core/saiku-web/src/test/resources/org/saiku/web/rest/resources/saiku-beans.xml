@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 
 <beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:util="http://www.springframework.org/schema/util"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd">
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+	http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-2.0.xsd">
 
 <bean id="classpathDsManager" class="org.saiku.service.datasource.ClassPathResourceDatasourceManager">
 		<property name="path" value="res:saiku-datasources"/>
@@ -21,8 +23,24 @@
 		<property name="datasourceService" ref="datasourceServiceBean" />
 	</bean>
 
+	<bean id="cellSetFormatter" class="org.saiku.olap.util.formatter.CellSetFormatter" scope="prototype"/>
+	<bean id="hierarchicalCellSetFormatter" class="org.saiku.olap.util.formatter.HierarchicalCellSetFormatter" scope="prototype"/>
+	<bean id="flattenedCellSetFormatter" class="org.saiku.olap.util.formatter.FlattenedCellSetFormatter" scope="prototype"/>
+
+	<util:map id="cellSetFormatterMap">
+	    <entry key="flat" value="cellSetFormatter"/>
+	    <entry key="hierarchical" value="hierarchicalCellSetFormatter"/>
+	    <entry key="flattened" value="flattenedCellSetFormatter"/>
+	</util:map>
+
+	<bean id="prototypedBeanFactory" class="org.saiku.web.factory.PrototypedBeanFactory">
+		<property name="cellSetFormatterMap" ref="cellSetFormatterMap"/>
+		<property name="defaultCellSetFormatterBeanId" value="flattenedCellSetFormatter"/>
+	</bean>
+
 	<bean id="olapQueryBean" class="org.saiku.service.olap.OlapQueryService">
 		<property name="olapDiscoverService" ref="olapDiscoverServiceBean" />
+		<property name="cellSetFormatterFactory" ref="prototypedBeanFactory"/>
 	</bean>
 
 
