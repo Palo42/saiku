@@ -19,6 +19,7 @@
  */
 package org.saiku.datasources.connection;
 
+import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -26,6 +27,8 @@ import java.util.Properties;
 import org.olap4j.OlapConnection;
 import org.saiku.datasources.datasource.SaikuDatasource;
 import org.saiku.service.datasource.IDatasourceManager;
+import org.saiku.service.datasource.IDatasourceProcessor;
+import org.saiku.service.util.exception.SaikuServiceException;
 
 public abstract class AbstractConnectionManager implements IConnectionManager {
 
@@ -42,9 +45,32 @@ public abstract class AbstractConnectionManager implements IConnectionManager {
 
 	public abstract void init();
 
+	private SaikuDatasource preProcess(SaikuDatasource datasource) {
+		if (datasource.getProperties().containsKey(ISaikuConnection.DATASOURCE_PROCESSORS)) {
+			datasource = datasource.clone();
+			String[] processors = datasource.getProperties().getProperty(ISaikuConnection.DATASOURCE_PROCESSORS).split(",");
+			for (String processor : processors) {
+				try {
+				@SuppressWarnings("unchecked")
+				final Class<IDatasourceProcessor> clazz =
+					(Class<IDatasourceProcessor>)
+					Class.forName(processor);
+				final Constructor<IDatasourceProcessor> ctor =
+					clazz.getConstructor();
+				final IDatasourceProcessor dsProcessor = ctor.newInstance();
+				datasource = dsProcessor.process(datasource);
+				}
+				catch (Exception e) {
+					throw new SaikuServiceException("Error applying DatasourceProcessor \"" + processor + "\"", e);
+				}
+			}
+		}
+		return datasource;
+	}
 
 	public ISaikuConnection getConnection(String name) {
 		SaikuDatasource datasource = ds.getDatasource(name);
+		datasource = preProcess(datasource);
 		return getInternalConnection(name, datasource);
 	}
 
@@ -60,7 +86,9 @@ public abstract class AbstractConnectionManager implements IConnectionManager {
 	}
 
 	public void refreshConnection(String name) {
-		refreshInternalConnection(name, ds.getDatasource(name));
+		SaikuDatasource datasource = ds.getDatasource(name);
+		datasource = preProcess(datasource);
+		refreshInternalConnection(name, datasource);
 	}
 
 	public Map<String, ISaikuConnection> getAllConnections() {

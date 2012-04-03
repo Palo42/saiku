@@ -28,9 +28,12 @@ import java.util.Properties;
 import org.olap4j.Axis;
 import org.olap4j.Axis.Standard;
 import org.olap4j.CellSet;
+import org.olap4j.OlapConnection;
+import org.olap4j.OlapStatement;
 import org.olap4j.Scenario;
 import org.olap4j.impl.IdentifierParser;
 import org.olap4j.mdx.ParseTreeWriter;
+import org.olap4j.metadata.Catalog;
 import org.olap4j.metadata.Cube;
 import org.olap4j.query.Query;
 import org.olap4j.query.QueryAxis;
@@ -38,6 +41,7 @@ import org.olap4j.query.QueryDimension;
 import org.olap4j.query.QueryDimension.HierarchizeMode;
 import org.olap4j.query.Selection;
 import org.saiku.olap.dto.SaikuCube;
+import org.saiku.olap.dto.SaikuTag;
 import org.saiku.olap.query.QueryProperties.QueryProperty;
 import org.saiku.olap.query.QueryProperties.QueryPropertyFactory;
 import org.saiku.olap.util.SaikuProperties;
@@ -49,6 +53,8 @@ public class OlapQuery implements IQuery {
 
     private static final Logger log = LoggerFactory.getLogger(OlapQuery.class);
 
+    private static final String SCENARIO = "Scenario";
+
 	private Query query;
 	private Properties properties = new Properties();
 
@@ -56,16 +62,25 @@ public class OlapQuery implements IQuery {
 	
 	private Scenario scenario;
 	
-	public OlapQuery(Query query, SaikuCube cube, boolean applyDefaultProperties) {
+	private SaikuTag tag = null;
+	
+	private CellSet cellset = null;
+
+	private OlapStatement statement = null;
+
+	private OlapConnection connection;
+	
+	public OlapQuery(Query query, OlapConnection connection, SaikuCube cube, boolean applyDefaultProperties) {
 		this.query = query;
 		this.cube = cube;
+		this.connection = connection;
 		if (applyDefaultProperties) {
 			applyDefaultProperties();	
 		}
 	}
 
-	public OlapQuery(Query query, SaikuCube cube) {
-		this(query,cube,true);
+	public OlapQuery(Query query, OlapConnection connection, SaikuCube cube) {
+		this(query,connection, cube,true);
 	}
 	
 	public void swapAxes() {
@@ -101,28 +116,36 @@ public class OlapQuery implements IQuery {
 	}
 	
 	public void moveDimension(QueryDimension dimension, Axis axis) {
-		dimension.setHierarchizeMode(HierarchizeMode.PRE);
-		if (dimension.getName() != "Measures") {
-			dimension.setHierarchyConsistent(true);
-		}
-		QueryAxis oldQueryAxis = findAxis(dimension);
-		QueryAxis newQueryAxis = query.getAxis(axis);
-		if (oldQueryAxis != null && newQueryAxis != null) {
-            oldQueryAxis.removeDimension(dimension);
-            newQueryAxis.addDimension(dimension);   
-		}
+		moveDimension(dimension, axis, -1);
 	}
 
 	public void moveDimension(QueryDimension dimension, Axis axis, int position) {
 		dimension.setHierarchizeMode(HierarchizeMode.PRE);
+        QueryAxis oldQueryAxis = findAxis(dimension);
+        QueryAxis newQueryAxis = query.getAxis(axis);
 		if (dimension.getName() != "Measures") {
 			dimension.setHierarchyConsistent(true);
 		}
-        QueryAxis oldQueryAxis = findAxis(dimension);
-        QueryAxis newQueryAxis = query.getAxis(axis);
-        if (oldQueryAxis != null && newQueryAxis != null) {
+		
+		if (oldQueryAxis != null && newQueryAxis != null && (oldQueryAxis.getLocation() != newQueryAxis.getLocation()) && oldQueryAxis.getLocation() != null) {
+			for (QueryAxis qAxis : query.getAxes().values()) {
+				if (qAxis.getSortOrder() != null && qAxis.getSortIdentifierNodeName() != null) {
+					String sortLiteral = qAxis.getSortIdentifierNodeName();
+					if (sortLiteral.startsWith(dimension.getDimension().getUniqueName()) || sortLiteral.startsWith("[" + dimension.getName())) {
+						qAxis.clearSort();
+						// System.out.println("Removed Sort: " + qAxis.getLocation() + " - "+ sortLiteral);
+					}
+				}
+			}
+		}
+
+        if (oldQueryAxis != null && newQueryAxis != null && (position > -1 || (oldQueryAxis.getLocation() != newQueryAxis.getLocation()))) {
             oldQueryAxis.removeDimension(dimension);
-            newQueryAxis.addDimension(position, dimension);   
+            if (position > -1) {
+            	newQueryAxis.addDimension(position, dimension);
+            } else {
+            	newQueryAxis.addDimension(dimension);
+            }
         }
     }
 	
@@ -162,8 +185,8 @@ public class OlapQuery implements IQuery {
     
     public CellSet execute() throws Exception {
 
-    	if (scenario != null && query.getDimension("Scenario") != null) {
-    		QueryDimension dimension = query.getDimension("Scenario");
+    	if (scenario != null && query.getDimension(SCENARIO) != null) {
+    		QueryDimension dimension = query.getDimension(SCENARIO);
     		moveDimension(dimension, Axis.FILTER);
     		Selection sel = dimension.createSelection(IdentifierParser.parseIdentifier("[Scenario].[" + getScenario().getId() + "]"));
     		if (!dimension.getInclusions().contains(sel)) {
@@ -171,14 +194,19 @@ public class OlapQuery implements IQuery {
     		}
     	}
     	
-        Query mdx = this.query;
-        mdx.validate();
-        StringWriter writer = new StringWriter();
-        mdx.getSelect().unparse(new ParseTreeWriter(new PrintWriter(writer)));
-        CellSet cellSet = mdx.execute();
-        log.debug("Executing query (" + this.getName() + ") :\n" + writer.toString());
-    	if (scenario != null && query.getDimension("Scenario") != null) {
-    		QueryDimension dimension = query.getDimension("Scenario");
+        String mdx = getMdx();
+        
+        log.debug("Executing query (" + this.getName() + ") :\n" + mdx);
+        
+        final Catalog catalog = query.getCube().getSchema().getCatalog();
+        this.connection.setCatalog(catalog.getName());
+		OlapStatement stmt = connection.createStatement();
+		this.statement = stmt;
+		CellSet cellSet = stmt.executeOlapQuery(mdx);
+		this.statement.close();
+		this.statement = null;
+    	if (scenario != null && query.getDimension(SCENARIO) != null) {
+    		QueryDimension dimension = query.getDimension(SCENARIO);
     		dimension.getInclusions().clear();
     		moveDimension(dimension, null);
     	}
@@ -259,6 +287,44 @@ public class OlapQuery implements IQuery {
 	
 	public Scenario getScenario() {
 		return scenario;
+	}
+
+	public void setTag(SaikuTag tag) {
+		this.tag = tag;
+	}
+
+	public SaikuTag getTag() {
+		return this.tag;
+	}
+
+	public void removeTag() {
+		tag = null;		
+	}
+
+	public void storeCellset(CellSet cs) {
+		this.cellset = cs;
+		
+	}
+
+	public CellSet getCellset() {
+		return cellset;
+	}
+
+	public void setStatement(OlapStatement os) {
+		this.statement = os;
+		
+	}
+
+	public OlapStatement getStatement() {
+		return this.statement;
+	}
+
+	public void cancel() throws Exception {
+		if (this.statement != null && !this.statement.isClosed()) {
+			statement.cancel();
+			statement.close();
+		}
+		this.statement = null;
 	}
 
 }

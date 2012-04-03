@@ -19,12 +19,10 @@
  */
 package org.saiku.plugin;
 
-import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 
 import mondrian.olap4j.SaikuMondrianHelper;
 
@@ -60,7 +58,6 @@ public class PentahoSecurityAwareConnectionManager extends AbstractConnectionMan
 	@Override
 	protected ISaikuConnection getInternalConnection(String name, SaikuDatasource datasource) {
 		ISaikuConnection con;
-		//		System.out.println("LOAD CONNECTION::::::::::::" + name);
 		if (userAware && PentahoSessionHolder.getSession().getName() != null) {
 			name = name + "-" + PentahoSessionHolder.getSession().getName();
 		}
@@ -90,10 +87,16 @@ public class PentahoSecurityAwareConnectionManager extends AbstractConnectionMan
 	@Override
 	protected void refreshInternalConnection(String name, SaikuDatasource datasource) {
 		try {
-			ISaikuConnection con = connections.remove(name);
-			if (con.refresh(datasource.getProperties())) {
-				connections.put(name, con);
+			String newname = name;
+			if (userAware && PentahoSessionHolder.getSession().getName() != null) {
+				newname = name + "-" + PentahoSessionHolder.getSession().getName();
 			}
+			ISaikuConnection con = connections.remove(newname);
+			if (con != null) {
+				con.clearCache();
+			}
+			con = null;
+			getInternalConnection(name, datasource);
 		}
 		catch (Exception e) {
 			e.printStackTrace();
@@ -109,16 +112,7 @@ public class PentahoSecurityAwareConnectionManager extends AbstractConnectionMan
 		if (PentahoSystem.getObjectFactory().objectDefined(MDXConnection.MDX_CONNECTION_MAPPER_KEY)) {
 			IConnectionUserRoleMapper mondrianUserRoleMapper = PentahoSystem.get(IConnectionUserRoleMapper.class, MDXConnection.MDX_CONNECTION_MAPPER_KEY, null);
 			if (mondrianUserRoleMapper != null) {
-				String url = datasource.getProperties().getProperty(ISaikuConnection.URL_KEY);
-				url = url.replaceAll(";","\n");
-				StringReader sr = new StringReader(url);
-				Properties props = new Properties();
-				props.load(sr);
-
-				//				String catalog = props.getProperty(RolapConnectionProperties.Catalog.name());
 				OlapConnection c = (OlapConnection) con.getConnection();
-				//				System.out.println("CatalogParse:" + c.getCatalog());
-
 				String[] validMondrianRolesForUser = mondrianUserRoleMapper.mapConnectionRoles(PentahoSessionHolder.getSession(), c.getCatalog());
 				if (setRole(con, validMondrianRolesForUser, datasource)) {
 					return con;

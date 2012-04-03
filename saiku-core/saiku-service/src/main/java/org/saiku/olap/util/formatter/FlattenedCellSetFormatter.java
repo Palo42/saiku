@@ -23,6 +23,7 @@ import java.text.DecimalFormat;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -282,12 +283,10 @@ public class FlattenedCellSetFormatter implements ICellSetFormatter {
 			}
 		}
 		// Populate matrix with cells representing axes
-		// noinspection SuspiciousNameCombination
 		populateAxis(matrix, columnsAxis, columnsAxisInfo, true, xOffsset);
 		populateAxis(matrix, rowsAxis, rowsAxisInfo, false, yOffset);
-		
-		
-			int headerwidth = matrix.getMatrixWidth();
+
+		int headerwidth = matrix.getMatrixWidth();
 
 			for(int yy=matrix.getMatrixHeight(); yy > matrix.getOffset() ; yy--) {
 				for(int xx=0; xx < headerwidth-1;xx++) {
@@ -308,34 +307,38 @@ public class FlattenedCellSetFormatter implements ICellSetFormatter {
 		List<Integer> doney = new ArrayList<Integer>();
 		for (final Cell cell : cellIter(pageCoords, cellSet)) {
 			final List<Integer> coordList = cell.getCoordinateList();
-			if (coordList.get(0) == 0) {
-				newxOffset = xOffsset;
-				donex = new ArrayList<Integer>();
-			}
-			int x = newxOffset;
-			if (coordList.size() > 0)
-				x += coordList.get(0);
 			int y = newyOffset;
-			if (coordList.size() > 1)
-				y += coordList.get(1);
+			int x = newxOffset;
+			if (coordList.size() > 0) {
+				if (coordList.get(0) == 0) {
+					newxOffset = xOffsset;
+					donex = new ArrayList<Integer>();
+				}
+				x = newxOffset;
+				if (coordList.size() > 0)
+					x += coordList.get(0);
+				y = newyOffset;
+				if (coordList.size() > 1)
+					y += coordList.get(1);
 
-			boolean stop = false;
-			if (ignorex.contains(coordList.get(0))) {
-				if (!donex.contains(coordList.get(0))) {
-					newxOffset--;
-					donex.add(coordList.get(0));
+				boolean stop = false;
+				if (coordList.size() > 0 && ignorex.contains(coordList.get(0))) {
+					if (!donex.contains(coordList.get(0))) {
+						newxOffset--;
+						donex.add(coordList.get(0));
+					}
+					stop = true;
 				}
-				stop = true;
-			}
-			if (ignorey.contains(coordList.get(1))) {
-				if (!doney.contains(coordList.get(1))) {
-					newyOffset--;
-					doney.add(coordList.get(1));
+				if (coordList.size() > 1 && ignorey.contains(coordList.get(1))) {
+					if (!doney.contains(coordList.get(1))) {
+						newyOffset--;
+						doney.add(coordList.get(1));
+					}
+					stop = true;
 				}
-				stop = true;
-			}
-			if (stop) {
-				continue;
+				if (stop) {
+					continue;
+				}
 			}
 			final DataCell cellInfo = new DataCell(true, false, coordList);
 			cellInfo.setCoordinates(cell.getCoordinateList());
@@ -376,7 +379,7 @@ public class FlattenedCellSetFormatter implements ICellSetFormatter {
 			if (cell.getValue() != null) {
 				try {
 					cellInfo.setRawNumber(cell.getDoubleValue());
-				} catch (OlapException e1) {
+				} catch (Exception e1) {
 				}
 			}
 			String cellValue = cell.getFormattedValue(); // First try to get a
@@ -468,50 +471,15 @@ public class FlattenedCellSetFormatter implements ICellSetFormatter {
 			for (int y = 0; y < members.length; y++) {
 				final MemberCell memberInfo = new MemberCell();
 				final Member member = members[y];
-				final List<String> memberPath = new ArrayList<String>();
-				expanded = false;
-				Boolean exit = false;
-				if (member != null) {
-					for (int z = i+1; z < axis.getPositionCount() && exit == false; z++) {
-						List<Member> posMembers = axis.getPositions().get(z).getMembers();
-						for (int k = 0;k<posMembers.size();k++) {
-							Member possibleChild = posMembers.get(k);
-							if (possibleChild.getParentMember() !=  null && possibleChild.getParentMember().equals(member)) {
-								expanded = true;
-								exit = true;
-								break;
-
-							}
-							if (member.getUniqueName().equals(possibleChild.getUniqueName())) {
-								if (posMembers.size() == 1) {
-									exit = true;
-									break;
-								}
-								else {
-									Boolean notExpanded = false;
-									for (int t = k+1;t<posMembers.size() && notExpanded == false;t++) {
-										Member prevPosMember = axis.getPositions().get(z-1).getMembers().get(t);
-										if (posMembers.get(t).getDimension().equals(prevPosMember.getDimension())
-												&&
-												posMembers.get(t).getHierarchy().equals(prevPosMember.getHierarchy())
-												&&
-												!axis.getPositions().get(z-1).getMembers().get(t).equals(posMembers.get(t))  ) {
-
-											notExpanded = true;
-										}
-									}
-									if (!notExpanded) {
-										exit = true;
-										break;
-									}
-								}
-							}                         
-						}
+				
+				int index = memberList.indexOf(member);
+				if (index >= 0) {
+					final AxisOrdinalInfo ordinalInfo = axisInfo.ordinalInfos.get(index);
+					int depth_i = ordinalInfo.getDepths().indexOf(member.getDepth());
+					if (depth_i > 0) {
+						expanded = true;
 					}
 				}
-				if (member != null)
-					memberPath.add(member.getUniqueName());
-				memberInfo.setMemberPath(memberPath);
 				memberInfo.setExpanded(expanded);
 				same = same && i > 0 && Olap4jUtil.equal(prevMembers[y], member);
 
@@ -579,7 +547,7 @@ public class FlattenedCellSetFormatter implements ICellSetFormatter {
 				}
 				int x_parent = isColumns ? x : y-1;
 				int y_parent = isColumns ? y-1 : x;
-				int index = memberList.indexOf(member);
+				
 				if (index >= 0) {
 					final AxisOrdinalInfo ordinalInfo = axisInfo.ordinalInfos.get(index);
 					int depth_i = ordinalInfo.getDepths().indexOf(member.getDepth());
@@ -591,11 +559,17 @@ public class FlattenedCellSetFormatter implements ICellSetFormatter {
 							parent = parent.getParentMember();
 						}
 						final MemberCell pInfo = new MemberCell();
-						pInfo.setRawValue(parent.getCaption());
-						pInfo.setFormattedValue(parent.getCaption()); // First try to get a formatted value
-						pInfo.setParentDimension(parent.getDimension().getName());
-						pInfo.setUniquename(parent.getUniqueName());
-						
+						if (parent != null) {
+							pInfo.setRawValue(parent.getCaption());
+							pInfo.setFormattedValue(parent.getCaption()); // First try to get a formatted value
+							pInfo.setParentDimension(parent.getDimension().getName());
+							pInfo.setUniquename(parent.getUniqueName());
+						} else {
+							pInfo.setRawValue("");
+							pInfo.setFormattedValue(""); // First try to get a formatted value
+							pInfo.setParentDimension(member.getDimension().getName());
+							pInfo.setUniquename("");
+						}
 						matrix.set(x_parent, y_parent, pInfo);
 						if (isColumns) {
 							y_parent--;

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:util="http://www.springframework.org/schema/util"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+	http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-2.0.xsd">
+
+	<bean id="classpathDsManager" class="org.saiku.service.datasource.ClassPathResourceDatasourceManager">
+		<property name="path" value="res:saiku-datasources"/>
+	</bean>
+	 <!--  <property name="path" value="file:///var/saiku/saiku-datasources/"/> -->
+	
+	<bean id="sessionService" class="org.saiku.web.service.SessionService">
+	</bean>
+	
+	
+	<bean id="connectionManager" class="org.saiku.web.impl.SecurityAwareConnectionManager">
+		<property name="dataSourceManager" ref="classpathDsManager" />
+		<property name="sessionService" ref="sessionService" />
+	</bean>
+
+	<bean id="datasourceServiceBean" class="org.saiku.service.datasource.DatasourceService">
+		<property name="connectionManager" ref="connectionManager" />
+	</bean>
+
+	<bean id="olapDiscoverServiceBean" class="org.saiku.service.olap.OlapDiscoverService">
+		<property name="datasourceService" ref="datasourceServiceBean" />
+	</bean>
+
+	<bean id="cellSetFormatter" class="org.saiku.olap.util.formatter.CellSetFormatter" scope="prototype"/>
+	<bean id="hierarchicalCellSetFormatter" class="org.saiku.olap.util.formatter.HierarchicalCellSetFormatter" scope="prototype"/>
+	<bean id="flattenedCellSetFormatter" class="org.saiku.olap.util.formatter.FlattenedCellSetFormatter" scope="prototype"/>
+
+	<util:map id="cellSetFormatterMap">
+	    <entry key="flat" value="cellSetFormatter"/>
+	    <entry key="hierarchical" value="hierarchicalCellSetFormatter"/>
+	    <entry key="flattened" value="flattenedCellSetFormatter"/>
+	</util:map>
+
+	<bean id="prototypedBeanFactory" class="org.saiku.web.factory.PrototypedBeanFactory">
+		<property name="cellSetFormatterMap" ref="cellSetFormatterMap"/>
+		<property name="defaultCellSetFormatterBeanId" value="flattenedCellSetFormatter"/>
+	</bean>
+
+	<bean id="olapQueryBean" class="org.saiku.service.olap.OlapQueryService">
+		<property name="olapDiscoverService" ref="olapDiscoverServiceBean" />
+		<property name="cellSetFormatterFactory" ref="prototypedBeanFactory"/>
+	</bean>
+
+
+	<bean id="datasourceResourceBean" class="org.saiku.web.rest.resources.DataSourceResource">
+		<property name="datasourceService" ref="datasourceServiceBean" />
+	</bean>
+
+	<bean id="olapDiscoverBean" class="org.saiku.web.rest.resources.OlapDiscoverResource">
+		<property name="olapDiscoverService" ref="olapDiscoverServiceBean" />
+	</bean>
+
+
+	<bean id="queryResource" class="org.saiku.web.rest.resources.QueryResource">
+		<property name="olapQueryService" ref="olapQueryBean" />
+		<property name="olapDiscoverService" ref="olapDiscoverServiceBean" />
+	</bean>
+
+    <bean id="sessionResource" class="org.saiku.web.rest.resources.SessionResource">
+		<property name="sessionService" ref="sessionService" />
+	</bean>
+
+    
+	<bean id="repositoryBean" class="org.saiku.web.rest.resources.BasicRepositoryResource">
+		<property name="olapQueryService" ref="olapQueryBean" />
+		<property name="path" value="res:saiku-repository"/>
+		<property name="olapDiscoverService" ref="olapDiscoverServiceBean" />
+	</bean>
+ <!--  <property name="path" value="file:///var/saiku/saiku-datasources/"/> -->
+
+</beans>
