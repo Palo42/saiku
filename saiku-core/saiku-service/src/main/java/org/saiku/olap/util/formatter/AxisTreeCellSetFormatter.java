@@ -1,18 +1,18 @@
 package org.saiku.olap.util.formatter;
 
+
 import java.text.DecimalFormat;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.TreeSet;
 
 import org.apache.commons.lang.mutable.MutableInt;
+import org.apache.log4j.Logger;
 import org.olap4j.Cell;
 import org.olap4j.CellSet;
 import org.olap4j.CellSetAxis;
-import org.olap4j.CellSetAxisMetaData;
 import org.olap4j.OlapException;
 import org.olap4j.Position;
 import org.olap4j.impl.CoordinateIterator;
-import org.olap4j.metadata.Hierarchy;
 import org.olap4j.metadata.Member;
 import org.saiku.olap.dto.resultset.DataCell;
 import org.saiku.olap.dto.resultset.Matrix;
@@ -20,17 +20,7 @@ import org.saiku.olap.dto.resultset.MemberCell;
 
 public class AxisTreeCellSetFormatter implements ICellSetFormatter {
 
-    /**
-     * @param formattedValue
-     * @return values
-     */
-    public static String getValueString(final String formattedValue) {
-        final String[] values = formattedValue.split("\\|"); //$NON-NLS-1$
-        if (values.length > 1) {
-            return values[1];
-        }
-        return values[0];
-    }
+	private static final Logger LOGGER = Logger.getLogger(AxisTreeCellSetFormatter.class);
 
     public Matrix format(final CellSet cellSet) {
         // Compute how many rows are required to display the columns axis.
@@ -40,7 +30,7 @@ public class AxisTreeCellSetFormatter implements ICellSetFormatter {
         } else {
             columnsAxis = null;
         }
-        final AxisNode rootColAxisNode = computeAxisInfo(columnsAxis);
+        final Axis colAxis = AxisFactory.computeAxisInfo(columnsAxis);
 
         // Compute how many columns are required to display the rows axis.
         final CellSetAxis rowsAxis;
@@ -49,7 +39,7 @@ public class AxisTreeCellSetFormatter implements ICellSetFormatter {
         } else {
             rowsAxis = null;
         }
-        final AxisNode rootRowAxisNode = computeAxisInfo(rowsAxis);
+        final Axis rowAxis = AxisFactory.computeAxisInfo(rowsAxis);
 
         Matrix matrix = null;
         if (cellSet.getAxes().size() > 2) {
@@ -59,69 +49,13 @@ public class AxisTreeCellSetFormatter implements ICellSetFormatter {
                 dimensions[i - 2] = cellSetAxis.getPositions().size();
             }
             for (final int[] pageCoords : CoordinateIterator.iterate(dimensions)) {
-                matrix = formatPage(cellSet, pageCoords, columnsAxis, rootColAxisNode, rowsAxis, rootRowAxisNode);
+                matrix = formatPage(cellSet, pageCoords, columnsAxis, colAxis, rowsAxis, rowAxis);
             }
         } else {
-            matrix = formatPage(cellSet, new int[] {}, columnsAxis, rootColAxisNode, rowsAxis, rootRowAxisNode);
+            matrix = formatPage(cellSet, new int[] {}, columnsAxis, colAxis, rowsAxis, rowAxis);
         }
 
         return matrix;
-    }
-
-    /**
-     * Computes a description of an axis.
-     * the ordering by depth in hierarchy is not sufficient, each new node position members must be compared
-     * to all the tree nodes position members, and the children nodes may need reordering
-     * 
-     * @param axis
-     *            Axis
-     * @return Description of axis
-     */
-    public static AxisNode computeAxisInfo(CellSetAxis axis) {
-        if (axis == null) {
-            return new AxisNode();
-        }
-        AxisNode rootAxisNode = new AxisNode();
-        CellSetAxisMetaData axisMetaData = axis.getAxisMetaData();
-        List<Hierarchy> hierarchyList = axisMetaData.getHierarchies();
-        int hierarchyNb = hierarchyList.size();
-        rootAxisNode.depthInHierarchyList = new int[hierarchyNb];
-        for (int i = 0; i < hierarchyNb; i++) {
-            rootAxisNode.depthInHierarchyList[i] = -1;
-        }
-        List<Position> axisPositionList = axis.getPositions();
-        if (!axisPositionList.isEmpty()) {
-            AxisNode currentAxisNode = new AxisNode();
-            rootAxisNode.addChild(currentAxisNode);
-            currentAxisNode.root = rootAxisNode;
-            Position firstPosition = axisPositionList.get(0);
-            setHierarchyAndDepth(currentAxisNode, hierarchyList, firstPosition);
-            for (int i = 1; i < axisPositionList.size(); i++) {
-                Position position = axisPositionList.get(i);
-                AxisNode newNode = new AxisNode();
-                newNode.root = rootAxisNode;
-                setHierarchyAndDepth(newNode, hierarchyList, position);
-                while (!newNode.isUnder(currentAxisNode)) {
-                    currentAxisNode = currentAxisNode.parent;
-                }
-                currentAxisNode.addChild(newNode);
-                currentAxisNode = newNode;
-                
-            }
-        }
-        return rootAxisNode;
-    }
-
-    public static void setHierarchyAndDepth(AxisNode axisNode, List<Hierarchy> hierarchyList, Position position) {
-        axisNode.position = position;
-        int size = hierarchyList.size();
-        axisNode.depthInHierarchyList = new int[size];
-        List<Member> memberList = position.getMembers();
-        for (int i = 0; i < memberList.size(); i++) {
-            Member member = memberList.get(i);
-            int memberDepth = member.getDepth();
-            axisNode.depthInHierarchyList[i] = memberDepth;
-        }
     }
 
     /**
@@ -142,31 +76,43 @@ public class AxisTreeCellSetFormatter implements ICellSetFormatter {
      * @param rowsAxisInfo
      *            Description of rows axis
      */
-    private Matrix formatPage(final CellSet cellSet, final int[] pageCoords, final CellSetAxis columnsAxis, final AxisNode rootColAxisNode,
-            final CellSetAxis rowsAxis, final AxisNode rootRowAxisNode) {
+    private Matrix formatPage(final CellSet cellSet, final int[] pageCoords, final CellSetAxis columnsAxis, final Axis colAxis,
+            final CellSetAxis rowsAxis, final Axis rowAxis) {
         // Figure out the dimensions of the blank rectangle in the top left
         // corner.
-        int xOffset = rootRowAxisNode.getDepth();
-        int yOffset = rootColAxisNode.getDepth();
+        int xOffset = rowAxis.getDepth();
+        int yOffset = colAxis.getDepth();
 
-        List<Position> columnPositionList = columnsAxis.getPositions();
-        int columnPositionListSize = columnPositionList.size();
-        List<Position> rowPositionList = rowsAxis.getPositions();
-        int rowPositionListSize = rowPositionList.size();
+        int columnPositionListSize = colAxis.getAxisNodesNb();
+        int rowPositionListSize = rowAxis.getAxisNodesNb();
         // Populate a string matrix
-        final Matrix matrix = new Matrix(xOffset + (columnsAxis == null ? 1 : columnPositionListSize), yOffset
-                + (rowsAxis == null ? 1 : rowPositionListSize));
+        int width = xOffset + (columnsAxis == null ? 1 : columnPositionListSize);
+        int height = yOffset + (rowsAxis == null ? 1 : rowPositionListSize);
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("found : [" + columnPositionListSize + "] positions on the column axis and : [" + rowPositionListSize
+                    + "] positions on the row axis for : [" + xOffset + "] row headers and : [" + yOffset
+                    + "] column headers, matrix generated will be : [" + width + "] width and : [" + height + "] height");
+        }
+        final Matrix matrix = new Matrix(width, height);
 
-        populateCorner(rootColAxisNode, rootRowAxisNode, matrix, xOffset, yOffset);
-        populateRowAxis(rootColAxisNode, rootRowAxisNode, matrix, yOffset, rowPositionListSize);
+        populateCorner(colAxis, rowAxis, matrix, xOffset, yOffset);
+        populateRowAxis(colAxis, rowAxis, matrix, yOffset, rowPositionListSize);
 
-        populateColAxisWithValues(rootColAxisNode, rootRowAxisNode, cellSet, matrix, xOffset, yOffset);
+        populateColAxisWithValues(colAxis, rowAxis, cellSet, matrix, xOffset, yOffset);
 
         return matrix;
 
     }
 
-    public static void populateCorner(AxisNode rootColAxisNode, AxisNode rootRowAxisNode, Matrix matrix, int xOffset, int yOffset) {
+    /**
+     * not implemented, corner is empty
+     * @param colAxis
+     * @param rowAxis
+     * @param matrix
+     * @param xOffset
+     * @param yOffset
+     */
+    protected void populateCorner(Axis colAxis, Axis rowAxis, Matrix matrix, int xOffset, int yOffset) {
         for (int x = 0; x < xOffset; x++) {
             for (int y = 0; y < yOffset; y++) {
                 MemberCell memberCell = new MemberCell(false, x > 0);
@@ -179,180 +125,247 @@ public class AxisTreeCellSetFormatter implements ICellSetFormatter {
         }
     }
 
-    public static void populateRowAxis(AxisNode rootColAxisNode, AxisNode rootRowAxisNode, Matrix matrix, int yOffset, int rowPositionListSize) {
+    /**
+     * browse the row axis in order to fill the headers of the rows
+     * @param colAxis
+     * @param rowAxis
+     * @param matrix
+     * @param yOffset
+     * @param rowPositionListSize
+     */
+    protected void populateRowAxis(Axis colAxis, Axis rowAxis, Matrix matrix, int yOffset, int rowPositionListSize) {
         MutableInt y = new MutableInt(yOffset);
-        List<AxisNode> rootRowAxisNodeChildren = rootRowAxisNode.children;
+        List<AxisNode> rootRowAxisNodeChildren = rowAxis.getRootAxisNodeList();
         if (rootRowAxisNodeChildren != null) {
             for (AxisNode rowAxisNode : rootRowAxisNodeChildren) {
-                populateRowAxisNode(rowAxisNode, matrix, 0, y);
+                populateRowAxisNode(rowAxisNode, matrix, y);
             }
         }
     }
 
-    public static void populateRowAxisNode(AxisNode rowAxisNode, Matrix matrix, int x, MutableInt y) {
-        Position position = rowAxisNode.position;
+    /**
+     * on each row axis node, fill the row headers, then browse the children and fill the total line headers
+     * y is incremented at each execution of that method
+     * @param rowAxisNode
+     * @param matrix
+     * @param y
+     */
+    protected void populateRowAxisNode(AxisNode rowAxisNode, Matrix matrix, MutableInt y) {
+        Position position = rowAxisNode.getPosition();
         if (position != null) {
-            List<Member> memberList = position.getMembers();
-            AxisNode previousSibling = rowAxisNode.getPreviousSibling();
-            boolean fusionCell = true;
-            int xIncrement = 0;
-            for (int i = 0; i < memberList.size(); i++) {
-                //should not need this as tree ordering should be correct
-                Member member = memberList.get(i);
-                Integer depth = member.getDepth();
-                List<Integer> allLevelDisplayedInHierarchy = new ArrayList<Integer>();
-                rowAxisNode.root.getAllLevelDisplayedInHierarchy(i, allLevelDisplayedInHierarchy);
-                fusionCell = fillHeader(matrix, memberList, i, previousSibling, fusionCell, x + xIncrement, y.intValue());
-                int indexOf = allLevelDisplayedInHierarchy.indexOf(depth);
-                int inc = allLevelDisplayedInHierarchy.size() - indexOf;
-                for (int j = x + xIncrement + 1; j < x + xIncrement + inc; j++) {
-                    fillWithNull(matrix, j, y.intValue());
-                }
-                xIncrement += inc; 
-            }
+            fillRowHeaders(rowAxisNode, matrix, y.intValue(), position);
         }
-        List<AxisNode> rowAxisNodeChildren = rowAxisNode.children;
+        List<AxisNode> rowAxisNodeChildren = rowAxisNode.getChildren();
         if (rowAxisNodeChildren != null) {
-            AxisNode firstChild = rowAxisNodeChildren.get(0);
-            populateRowAxisNode(firstChild, matrix, x + 1, y);
-            for (int i = 1; i < rowAxisNodeChildren.size(); i++) {
-                AxisNode child = rowAxisNodeChildren.get(i);
-                for (int j = 0; j <= x; j++) {
-                    fillWithNull(matrix, j, y.intValue());
-                }
-                populateRowAxisNode(child, matrix, x + 1, y);
+            for (AxisNode child : rowAxisNodeChildren) {
+                populateRowAxisNode(child, matrix, y);                
             }
-            // fill before total node with null
-            for (int j = 0; j <= x; j++) {
-                fillWithNull(matrix, j, y.intValue());
-            }
-            // dump total node
-            fillTotal(matrix, x + 1, y.intValue());
-
-            // fill after total node with null
-            int depth = rowAxisNode.getDepth();
-            for (int j = x + 2; j < x + 2 + depth; j++) {
-                fillWithNull(matrix, j, y.intValue());
-            }
+            fillRowTotalLine(rowAxisNode, matrix, y.intValue(), position);
         }
         y.increment();
     }
 
-    public static void fillTotal(Matrix matrix, int x, int y) {
-        String caption = "total";
-        MemberCell totalMemberCell = new MemberCell();
-        totalMemberCell.setRawValue(caption);
-        totalMemberCell.setFormattedValue(caption);
-        matrix.set(x, y, totalMemberCell);
+    /**
+     * fill the row headers for that row axis node
+     * browse the hierarchies and dump row title
+     * @param rowAxisNode
+     * @param matrix
+     * @param y
+     * @param position
+     */
+    protected void fillRowHeaders(AxisNode rowAxisNode, Matrix matrix, int y, Position position) {
+        List<Member> memberList = position.getMembers();
+        AxisNode previousSibling = rowAxisNode.getPreviousSibling();
+        int x = 0;
+        for (int i = 0; i < memberList.size(); i++) {
+            Member member = memberList.get(i);
+            Axis axis = rowAxisNode.getAxis();
+            TreeSet<Integer> hierarchyDepthSet = axis.getDisplayedLevelDepthByHierarchy(i);
+            for (Integer hierarchyDepth : hierarchyDepthSet) {
+                if (member.getDepth() == hierarchyDepth.intValue()) {
+                    FillUtils.fillHeader(matrix, member, i, previousSibling, x, y);
+                } else {
+                    FillUtils.fillIfIsNull(matrix, x, y);
+                }
+                x++;
+            }
+        }
     }
 
-    protected static void fillCell(Matrix matrix, Member member, int x, int y) {
-        MemberCell memberCell = new MemberCell();
-        String caption = member.getCaption();
-        memberCell.setRawValue(caption);
-        memberCell.setFormattedValue(caption);
-        List<String> memberPath = new ArrayList<String>();
-        memberPath.add(member.getUniqueName());
-        memberCell.setMemberPath(memberPath);
-        matrix.set(x, y, memberCell);
+    /**
+     * fill the headers for a total row
+     * @param rowAxisNode
+     * @param matrix
+     * @param y
+     * @param position
+     */
+    protected void fillRowTotalLine(AxisNode rowAxisNode, Matrix matrix, int y, Position position) {
+        int x = 0;
+        List<Member> memberList = position.getMembers();
+        boolean totalDumped = false;
+        for (int i = 0; i < memberList.size(); i++) {
+            Member member = memberList.get(i);
+            int depth = member.getDepth();
+            Axis axis = rowAxisNode.getAxis();
+            TreeSet<Integer> hierarchyDepthSet = axis.getDisplayedLevelDepthByHierarchy(i);
+            //if not a total on that hierarchy, dumps empty
+            if (depth == hierarchyDepthSet.last().intValue()) {
+                for (int j = 0; j < hierarchyDepthSet.size(); j++) {
+                    FillUtils.fillWithNullOrEmptyIfTotalDumped(matrix, x, y, totalDumped);
+                    x++;
+                }
+            } else {
+                for (Integer hierarchyDepth : hierarchyDepthSet) {
+                    //this is a total on that hierarchy then dumps total at x+1 case
+                    if (depth == hierarchyDepth.intValue()) {
+                        FillUtils.fillWithNullOrEmptyIfTotalDumped(matrix, x, y, totalDumped);
+                        if (!totalDumped) {
+                            FillUtils.fillTotal(matrix, x + 1, y);
+                            totalDumped = true;
+                        }
+                    } else {
+                        FillUtils.fillWithNullOrEmptyIfTotalDumped(matrix, x, y, totalDumped);
+                    }
+                    x++;
+                }
+            }
+        }
     }
 
-    protected void populateColAxisWithValues(AxisNode rootColAxisNode, AxisNode rootRowAxisNode, CellSet cellSet, Matrix matrix, int xOffset,
+    /**
+     * browse the column axis in order to fill the column headers and the value in the matrix
+     * @param colAxis
+     * @param rowAxis
+     * @param cellSet
+     * @param matrix
+     * @param xOffset
+     * @param yOffset
+     */
+    protected void populateColAxisWithValues(Axis colAxis, Axis rowAxis, CellSet cellSet, Matrix matrix, int xOffset,
             int yOffset) {
         MutableInt x = new MutableInt(xOffset);
-        List<AxisNode> rootColAxisNodeChildren = rootColAxisNode.children;
+        List<AxisNode> rootColAxisNodeChildren = colAxis.getRootAxisNodeList();
         if (rootColAxisNodeChildren != null) {
             for (AxisNode colAxisNode : rootColAxisNodeChildren) {
-                populateColAxisNodeWithValues(colAxisNode, rootRowAxisNode, cellSet, matrix, yOffset, x, 0);
+                populateColAxisNodeWithValues(colAxisNode, rowAxis, cellSet, matrix, yOffset, x);
             }
         }
     }
 
-    public static void populateColAxisNodeWithValues(AxisNode colAxisNode, AxisNode rootRowAxisNode, CellSet cellSet, Matrix matrix, int yOffset,
-            MutableInt x, int y) {
-        Position position = colAxisNode.position;
+    /**
+     * dump the column headers and the values of that axis node
+     * fill the column headers, browse the children axis nodes, then dump the total line columns headers and finally dump the cell values
+     * @param colAxisNode
+     * @param rowAxis
+     * @param cellSet
+     * @param matrix
+     * @param yOffset
+     * @param x
+     */
+    protected void populateColAxisNodeWithValues(AxisNode colAxisNode, Axis rowAxis, CellSet cellSet, Matrix matrix, int yOffset,
+            MutableInt x) {
+        Position position = colAxisNode.getPosition();
         if (position != null) {
-            List<Member> memberList = position.getMembers();
-            AxisNode previousSibling = colAxisNode.getPreviousSibling();
-            boolean fusionCell = true;
-            int yIncrement = 0;
-            for (int i = 0; i < memberList.size(); i++) {
-              //should not need this as tree ordering should be correct
-                Member member = memberList.get(i);
-                Integer depth = member.getDepth();
-                List<Integer> allLevelDisplayedInHierarchy = new ArrayList<Integer>();
-                colAxisNode.root.getAllLevelDisplayedInHierarchy(i, allLevelDisplayedInHierarchy);
-                fusionCell = fillHeader(matrix, memberList, i, previousSibling, fusionCell, x.intValue(), y + yIncrement);
-                int indexOf = allLevelDisplayedInHierarchy.indexOf(depth);
-                int inc = allLevelDisplayedInHierarchy.size() - indexOf;
-                for (int j = y + yIncrement + 1; j < y + yIncrement + inc; j++) {
-                    fillWithNull(matrix, x.intValue(), j);
-                }
-                yIncrement += inc;
-            }
+            fillColHeaders(matrix, colAxisNode, x.intValue(), position);
         }
-        List<AxisNode> colAxisNodeChildren = colAxisNode.children;
+        List<AxisNode> colAxisNodeChildren = colAxisNode.getChildren();
         if (colAxisNodeChildren != null) {
-            AxisNode firstChild = colAxisNodeChildren.get(0);
-            populateColAxisNodeWithValues(firstChild, rootRowAxisNode, cellSet, matrix, yOffset, x, y + 1);
-            for (int i = 1; i < colAxisNodeChildren.size(); i++) {
-                AxisNode child = colAxisNodeChildren.get(i);
-                for (int j = 0; j <= y; j++) {
-                    fillWithNull(matrix, x.intValue(), j);
-                }
-                populateColAxisNodeWithValues(child, rootRowAxisNode, cellSet, matrix, yOffset, x, y + 1);
+            for (AxisNode child : colAxisNodeChildren) {
+                populateColAxisNodeWithValues(child, rowAxis, cellSet, matrix, yOffset, x);                
             }
-            for (int j = 0; j <= y; j++) {
-                fillWithNull(matrix, x.intValue(), j);
-            }
-            // dump total node
-            fillTotal(matrix, x.intValue(), y + 1);
-            int depth = colAxisNode.getDepth();
-            for (int j = y + 2; j < y + 2 + depth; j++) {
-                fillWithNull(matrix, x.intValue(), j);
-            }
+            fillColTotalLine(matrix, colAxisNode, x.intValue(), position);
         }
         MutableInt yCell = new MutableInt(yOffset);
-        populateColCells(cellSet, colAxisNode, rootRowAxisNode, position, matrix, x, yCell);
+        List<AxisNode> rootAxisNodeList = rowAxis.getRootAxisNodeList();
+        for (AxisNode rowRootAxisNode : rootAxisNodeList) {
+            populateColCells(cellSet, colAxisNode, rowRootAxisNode, position, matrix, x, yCell);
+        }
         x.increment();
     }
-
-    private static boolean fillHeader(Matrix matrix, List<Member> memberList, int i, AxisNode previousSibling, boolean fusionCell, int x, int y) {
-        Member member = memberList.get(i);
-        // once fusionCell has been set to false, any other line must not be
-        // fusioned
-        if (fusionCell) {
-            fusionCell = isFusionCell(previousSibling, i, member);
-        }
-        if (fusionCell) {
-            fillWithNull(matrix, x, y);
-        } else {
-            fillCell(matrix, member, x, y);
-        }
-        return fusionCell;
-    }
-
-    public static boolean isFusionCell(AxisNode previousSibling, int i, Member member) {
-        boolean fusionCell = false;
-        if (previousSibling != null) {
-            List<Member> previousSiblingMemberList = previousSibling.position.getMembers();
-            Member previousMember = previousSiblingMemberList.get(i);
-            if (previousMember.equals(member)) {
-                fusionCell = true;
+    
+    /**
+     * fill the column headers for that axis node
+     * @param matrix
+     * @param colAxisNode
+     * @param x
+     * @param position
+     */
+    protected void fillColHeaders(Matrix matrix, AxisNode colAxisNode, int x, Position position) {
+        List<Member> memberList = position.getMembers();
+        AxisNode previousSibling = colAxisNode.getPreviousSibling();
+        int y = 0;
+        for (int i = 0; i < memberList.size(); i++) {
+            Member member = memberList.get(i);
+            Axis axis = colAxisNode.getAxis();
+            TreeSet<Integer> hierarchyDepthSet = axis.getDisplayedLevelDepthByHierarchy(i);
+            for (Integer hierarchyDepth : hierarchyDepthSet) {
+                if (member.getDepth() == hierarchyDepth.intValue()) {
+                    FillUtils.fillHeader(matrix, member, i, previousSibling, x, y);
+                } else {
+                    FillUtils.fillIfIsNull(matrix, x, y);
+                }
+                y++;
             }
         }
-        return fusionCell;
     }
 
-    public static void populateColCells(CellSet cellSet, AxisNode colAxisNode, AxisNode rowAxisNode, Position colPosition, Matrix matrix,
+    /**
+     * fill the column headers of that total line
+     * @param matrix
+     * @param colAxisNode
+     * @param x
+     * @param position
+     */
+    protected void fillColTotalLine(Matrix matrix, AxisNode colAxisNode, int x, Position position) {
+        int y = 0;
+        List<Member> memberList = position.getMembers();
+        boolean totalDumped = false;
+        for (int i = 0; i < memberList.size(); i++) {
+            Member member = memberList.get(i);
+            int depth = member.getDepth();
+            Axis axis = colAxisNode.getAxis();
+            TreeSet<Integer> hierarchyDepthSet = axis.getDisplayedLevelDepthByHierarchy(i);
+            if (depth == hierarchyDepthSet.last().intValue()) {
+                for (int j = 0; j < hierarchyDepthSet.size(); j++) {
+                    FillUtils.fillWithNullOrEmptyIfTotalDumped(matrix, x, y, totalDumped);
+                    y++;
+                }
+            } else {
+                for (Integer hierarchyDepth : hierarchyDepthSet) {
+                    if (depth == hierarchyDepth.intValue()) {
+                        FillUtils.fillWithNullOrEmptyIfTotalDumped(matrix, x, y, totalDumped);
+                        if (!totalDumped) {
+                            FillUtils.fillTotal(matrix, x, y + 1);
+                            totalDumped = true;
+                        }
+                    } else {
+                        FillUtils.fillWithNullOrEmptyIfTotalDumped(matrix, x, y, totalDumped);
+                    }
+                    y++;
+                }
+            }
+        }
+    }
+
+    /**
+     * dump the cell values of that column axis node
+     * @param cellSet
+     * @param colAxisNode
+     * @param rowAxisNode
+     * @param colPosition
+     * @param matrix
+     * @param x
+     * @param y
+     */
+    protected void populateColCells(CellSet cellSet, AxisNode colAxisNode, AxisNode rowAxisNode, Position colPosition, Matrix matrix,
             MutableInt x, MutableInt y) {
-        List<AxisNode> rowAxisNodeChildren = rowAxisNode.children;
+        List<AxisNode> rowAxisNodeChildren = rowAxisNode.getChildren();
         if (rowAxisNodeChildren != null) {
             for (AxisNode rowAxisNodeChild : rowAxisNodeChildren) {
                 populateColCells(cellSet, colAxisNode, rowAxisNodeChild, colPosition, matrix, x, y);
             }
         }
-        Position rowPosition = rowAxisNode.position;
+        Position rowPosition = rowAxisNode.getPosition();
         // not root node
         if (rowPosition != null) {
             Cell cell = cellSet.getCell(colPosition, rowPosition);
@@ -386,96 +399,9 @@ public class AxisTreeCellSetFormatter implements ICellSetFormatter {
                 }
                 // the raw value
             }
-            cellInfo.setFormattedValue(getValueString(cellValue));
+            cellInfo.setFormattedValue(FillUtils.getValueString(cellValue));
             matrix.set(x.intValue(), y.intValue(), cellInfo);
             y.increment();
-        }
-    }
-
-    public static void fillWithNull(Matrix matrix, int x, int y) {
-        MemberCell nullMemberCell = new MemberCell();
-        nullMemberCell.setRawValue(null);
-        nullMemberCell.setFormattedValue(null);
-        matrix.set(x, y, nullMemberCell);
-    }
-
-    private static class AxisNode {
-        public AxisNode root;
-        public int[] depthInHierarchyList;
-        public int indexInChildren;
-        public Position position;
-        public List<AxisNode> children;
-        public AxisNode parent;
-
-        public void addChild(AxisNode child) {
-            if (children == null) {
-                children = new ArrayList<AxisNode>();
-            }
-            children.add(child);
-            child.parent = this;
-            child.indexInChildren = children.size() - 1;
-        }
-        
-        public List<Integer> getAllLevelDisplayedInHierarchy(int hierarchyIdx, List<Integer> allLevelDisplayedInHierarchy) {
-            Integer levelDisplayed = depthInHierarchyList[hierarchyIdx];
-            if (levelDisplayed != -1 && !allLevelDisplayedInHierarchy.contains(levelDisplayed)) {
-                 allLevelDisplayedInHierarchy.add(levelDisplayed);
-            }
-            if (children != null) {
-                for (AxisNode child : children) {
-                    allLevelDisplayedInHierarchy = child.getAllLevelDisplayedInHierarchy(hierarchyIdx, allLevelDisplayedInHierarchy);
-                }
-            }
-            return allLevelDisplayedInHierarchy;
-        }
-
-        public boolean isUnder(AxisNode compared) {
-            for (int i = 0; i < depthInHierarchyList.length; i++) {
-                int depth = depthInHierarchyList[i];
-                int comparedDepth = compared.depthInHierarchyList[i];
-                if (comparedDepth < depth) {
-                    return true;
-                } else if (comparedDepth > depth) {
-                    return false;
-                }
-            }
-            return false;
-        }
-
-        public AxisNode getPreviousSibling() {
-            if (indexInChildren == 0) {
-                return null;
-            }
-            return parent.children.get(indexInChildren - 1);
-        }
-
-        public int getDepth() {
-            if (children == null) {
-                if (position == null) {
-                    return 0;
-                }
-                List<Member> memberList = position.getMembers();
-                return memberList.size() - 1;
-            }
-            int childMaxDepth = 0;
-            for (AxisNode child : children) {
-                int childDepth = child.getDepth();
-                childMaxDepth = Math.max(childMaxDepth, childDepth);
-            }
-            return childMaxDepth + 1;
-        }
-
-        @Override
-        public String toString() {
-            if (position == null) {
-                return "";
-            }
-            StringBuffer returned = new StringBuffer("depth");
-            returned.append(java.util.Arrays.toString(depthInHierarchyList));
-            if (position != null) {
-                returned.append(position.getMembers().toString());
-            }
-            return returned.toString();
         }
     }
 
